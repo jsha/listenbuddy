@@ -31,71 +31,34 @@ Example:
 			fmt.Println("accept", err)
 			return
 		}
-		go handleConnection(conn)
+		handleConnection(conn)
 	}
 }
 
-func makeChan(r io.Reader) chan []byte {
-	c := make(chan []byte, 10)
-	go readToChan(r, c)
-	return c
-}
-
-func readToChan(r io.Reader, c chan []byte) {
-	for {
-		buf := make([]byte, 512)
-		n, err := r.Read(buf)
-		if err != nil {
-			if err.Error() != "EOF" {
-				fmt.Printf("read", err)
-			}
-			close(c)
-			return
-		}
-		c <- buf[0:n]
-	}
-}
-
+// Any time we get an inbound connection, connect to the "speak" host and port,
+// and spawn two goroutines: one to copy data in each direction.
+// When either connection generates an error (terminating the Copy call), close
+// both connections.
 func handleConnection(hearing net.Conn) {
 	speaking, err := net.Dial("tcp", *speak)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	hearingChan := makeChan(hearing)
-	backtalkChan := makeChan(speaking)
-	for {
-		select {
-		case heard, ok := <-hearingChan:
-			if !ok {
-				speaking.Close()
-				hearing.Close()
-				return
-			}
-			n, err := speaking.Write(heard)
-			if err != nil {
-				fmt.Println("hear", err)
-				return
-			}
-			if n != len(heard) {
-				fmt.Println("short write")
-				return
-			}
-		case replied, ok := <-backtalkChan:
-			if !ok {
-				speaking.Close()
-				hearing.Close()
-				return
-			}
-			n, err := hearing.Write(replied)
-			if err != nil {
-				fmt.Println("backtalk", err)
-				return
-			}
-			if n != len(replied) {
-				fmt.Println("short write")
-				return
-			}
+	go func() {
+		_, err := io.Copy(hearing, speaking)
+		if err != nil {
+			fmt.Println(err)
 		}
-	}
+		hearing.Close()
+		speaking.Close()
+	}()
+	go func() {
+		_, err := io.Copy(speaking, hearing)
+		if err != nil {
+			fmt.Println(err)
+		}
+		hearing.Close()
+		speaking.Close()
+	}()
 }
