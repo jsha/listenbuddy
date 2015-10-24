@@ -47,9 +47,10 @@ func readToChan(r io.Reader, c chan []byte) {
 		n, err := r.Read(buf)
 		if err != nil {
 			if err.Error() != "EOF" {
-				fmt.Println("read", err)
-				return
+				fmt.Printf("read", err)
 			}
+			close(c)
+			return
 		}
 		c <- buf[0:n]
 	}
@@ -65,7 +66,12 @@ func handleConnection(hearing net.Conn) {
 	backtalkChan := makeChan(speaking)
 	for {
 		select {
-		case heard := <-hearingChan:
+		case heard, ok := <-hearingChan:
+			if !ok {
+				speaking.Close()
+				hearing.Close()
+				return
+			}
 			n, err := speaking.Write(heard)
 			if err != nil {
 				fmt.Println("hear", err)
@@ -75,7 +81,12 @@ func handleConnection(hearing net.Conn) {
 				fmt.Println("short write")
 				return
 			}
-		case replied := <-backtalkChan:
+		case replied, ok := <-backtalkChan:
+			if !ok {
+				speaking.Close()
+				hearing.Close()
+				return
+			}
 			n, err := hearing.Write(replied)
 			if err != nil {
 				fmt.Println("backtalk", err)
