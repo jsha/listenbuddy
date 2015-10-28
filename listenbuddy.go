@@ -2,11 +2,18 @@ package main
 
 import "fmt"
 import "net"
+import "sync"
 import "io"
 import "flag"
+import "os"
+import "os/signal"
+import "syscall"
 
 var listen = flag.String("listen", "", "port (and optionally address) to listen on")
 var speak = flag.String("speak", "", "address and port to connect to")
+
+var connections = make(map[net.Conn]struct{}, 100)
+var cMu sync.Mutex
 
 func main() {
 	flag.Parse()
@@ -25,6 +32,7 @@ Example:
 		fmt.Println(err)
 		return
 	}
+	go handleSignals()
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -35,6 +43,35 @@ Example:
 	}
 }
 
+func handleSignals() {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGUSR1)
+	for _ = range ch {
+		fmt.Println("closing")
+		closeAllConnections()
+	}
+}
+
+func closeAllConnections() {
+	cMu.Lock()
+	defer cMu.Unlock()
+	for c, _ := range connections {
+		c.Close()
+	}
+}
+
+func addConnection(c net.Conn) {
+	cMu.Lock()
+	connections[c] = struct{}{}
+	cMu.Unlock()
+}
+
+func removeConnection(c net.Conn) {
+	cMu.Lock()
+	delete(connections, c)
+	cMu.Unlock()
+}
+
 // Any time we get an inbound connection, connect to the "speak" host and port,
 // and spawn two goroutines: one to copy data in each direction.
 // When either connection generates an error (terminating the Copy call), close
@@ -43,8 +80,11 @@ func handleConnection(hearing net.Conn) {
 	speaking, err := net.Dial("tcp", *speak)
 	if err != nil {
 		fmt.Println(err)
+		hearing.Close()
 		return
 	}
+	addConnection(hearing)
+	addConnection(speaking)
 	go func() {
 		_, err := io.Copy(hearing, speaking)
 		if err != nil {
@@ -52,6 +92,7 @@ func handleConnection(hearing net.Conn) {
 		}
 		hearing.Close()
 		speaking.Close()
+		removeConnection(speaking)
 	}()
 	go func() {
 		_, err := io.Copy(speaking, hearing)
@@ -60,5 +101,6 @@ func handleConnection(hearing net.Conn) {
 		}
 		hearing.Close()
 		speaking.Close()
+		removeConnection(speaking)
 	}()
 }
