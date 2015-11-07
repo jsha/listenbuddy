@@ -9,11 +9,14 @@ import "os"
 import "os/signal"
 import "syscall"
 
-var listen = flag.String("listen", "", "port (and optionally address) to listen on")
-var speak = flag.String("speak", "", "address and port to connect to")
+var (
+	listen  = flag.String("listen", "", "port (and optionally address) to listen on")
+	speak   = flag.String("speak", "", "address and port to connect to")
+	verbose = flag.Bool("v", false, "print errors that occur during copying of data")
 
-var connections = make(map[net.Conn]struct{}, 100)
-var cMu sync.Mutex
+	connections = make(map[net.Conn]struct{}, 100)
+	cMu         sync.Mutex
+)
 
 func main() {
 	flag.Parse()
@@ -39,7 +42,7 @@ Example:
 			fmt.Println("accept", err)
 			return
 		}
-		handleConnection(conn)
+		go handleConnection(conn)
 	}
 }
 
@@ -79,28 +82,26 @@ func removeConnection(c net.Conn) {
 func handleConnection(hearing net.Conn) {
 	speaking, err := net.Dial("tcp", *speak)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Printf("dial to %#v: %s\n", *speak, err)
 		hearing.Close()
 		return
 	}
 	addConnection(hearing)
 	addConnection(speaking)
-	go func() {
-		_, err := io.Copy(hearing, speaking)
-		if err != nil {
-			fmt.Println(err)
-		}
-		hearing.Close()
-		speaking.Close()
-		removeConnection(speaking)
-	}()
-	go func() {
-		_, err := io.Copy(speaking, hearing)
-		if err != nil {
-			fmt.Println(err)
-		}
-		hearing.Close()
-		speaking.Close()
-		removeConnection(speaking)
-	}()
+	ch := make(chan error, 1)
+	go connCopy(hearing, speaking, ch)
+	go connCopy(speaking, hearing, ch)
+	<-ch
+	hearing.Close()
+	speaking.Close()
+	removeConnection(hearing)
+	removeConnection(speaking)
+}
+
+func connCopy(dst io.Writer, src io.Reader, dstCh chan<- error) {
+	_, err := io.Copy(dst, src)
+	if err != nil && *verbose {
+		fmt.Println("copy:", err)
+	}
+	dstCh <- err
 }
