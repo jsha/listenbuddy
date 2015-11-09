@@ -83,7 +83,7 @@ func removeConnection(c *net.TCPConn) {
 	cMu.Unlock()
 }
 
-func copy(dst, src *net.TCPConn) {
+func copyConn(dst, src *net.TCPConn) {
 	addConnection(src)
 	_, err := io.Copy(dst, src)
 	if err != nil {
@@ -105,6 +105,6 @@ func handleConn(speakAddr *net.TCPAddr, hearing *net.TCPConn) {
 		hearing.Close()
 		return
 	}
-	go copy(speaking, hearing)
-	copy(hearing, speaking)
+	go copyConn(speaking, hearing)
+	copyConn(hearing, speaking)
 }
