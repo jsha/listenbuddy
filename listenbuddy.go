@@ -12,7 +12,7 @@ import "syscall"
 var listen = flag.String("listen", "", "port (and optionally address) to listen on")
 var speak = flag.String("speak", "", "address and port to connect to")
 
-var connections = make(map[net.Conn]struct{}, 100)
+var connections = make(map[*net.TCPConn]struct{}, 100)
 var cMu sync.Mutex
 
 func main() {
@@ -27,19 +27,30 @@ Example:
 		return
 	}
 
-	ln, err := net.Listen("tcp", *listen)
+	speakAddr, err := net.ResolveTCPAddr("tcp", *speak)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	listenAddr, err := net.ResolveTCPAddr("tcp", *listen)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	ln, err := net.ListenTCP("tcp", listenAddr)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 	go handleSignals()
 	for {
-		conn, err := ln.Accept()
+		conn, err := ln.AcceptTCP()
 		if err != nil {
 			fmt.Println("accept", err)
 			return
 		}
-		handleConnection(conn)
+		go handleConn(speakAddr, conn)
 	}
 }
 
@@ -56,51 +67,44 @@ func closeAllConnections() {
 	cMu.Lock()
 	defer cMu.Unlock()
 	for c, _ := range connections {
-		c.Close()
+		c.CloseWrite()
 	}
 }
 
-func addConnection(c net.Conn) {
+func addConnection(c *net.TCPConn) {
 	cMu.Lock()
 	connections[c] = struct{}{}
 	cMu.Unlock()
 }
 
-func removeConnection(c net.Conn) {
+func removeConnection(c *net.TCPConn) {
 	cMu.Lock()
 	delete(connections, c)
 	cMu.Unlock()
+}
+
+func copy(dst, src *net.TCPConn) {
+	addConnection(src)
+	_, err := io.Copy(dst, src)
+	if err != nil {
+		fmt.Println(err)
+	}
+	src.Close()
+	dst.CloseWrite()
+	removeConnection(src)
 }
 
 // Any time we get an inbound connection, connect to the "speak" host and port,
 // and spawn two goroutines: one to copy data in each direction.
 // When either connection generates an error (terminating the Copy call), close
 // both connections.
-func handleConnection(hearing net.Conn) {
-	speaking, err := net.Dial("tcp", *speak)
+func handleConn(speakAddr *net.TCPAddr, hearing *net.TCPConn) {
+	speaking, err := net.DialTCP("tcp", nil, speakAddr)
 	if err != nil {
 		fmt.Println(err)
 		hearing.Close()
 		return
 	}
-	addConnection(hearing)
-	addConnection(speaking)
-	go func() {
-		_, err := io.Copy(hearing, speaking)
-		if err != nil {
-			fmt.Println(err)
-		}
-		hearing.Close()
-		speaking.Close()
-		removeConnection(speaking)
-	}()
-	go func() {
-		_, err := io.Copy(speaking, hearing)
-		if err != nil {
-			fmt.Println(err)
-		}
-		hearing.Close()
-		speaking.Close()
-		removeConnection(speaking)
-	}()
+	go copy(speaking, hearing)
+	copy(hearing, speaking)
 }
