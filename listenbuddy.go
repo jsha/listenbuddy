@@ -33,13 +33,13 @@ Example:
 
 	speakAddr, err := net.ResolveTCPAddr("tcp", *speak)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
 
 	listenAddr, err := net.ResolveTCPAddr("tcp", *listen)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
 	ln, err := net.ListenTCP("tcp", listenAddr)
@@ -91,7 +91,7 @@ func copyConn(dst, src *net.TCPConn) {
 	addConnection(src)
 	_, err := io.Copy(dst, src)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 	}
 	src.Close()
 	dst.CloseWrite()
