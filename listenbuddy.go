@@ -1,13 +1,16 @@
 package main
 
-import "fmt"
-import "net"
-import "sync"
-import "io"
-import "flag"
-import "os"
-import "os/signal"
-import "syscall"
+import (
+	"flag"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+)
 
 var listen = flag.String("listen", "", "port (and optionally address) to listen on")
 var speak = flag.String("speak", "", "address and port to connect to")
@@ -26,17 +29,18 @@ Example:
 		flag.Usage()
 		return
 	}
+	log.SetPrefix("listenbuddy ")
 
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
 	go handleSignals()
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			fmt.Println("accept", err)
+			log.Println("accept", err)
 			return
 		}
 		handleConnection(conn)
@@ -47,7 +51,7 @@ func handleSignals() {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGUSR1)
 	for _ = range ch {
-		fmt.Println("closing")
+		log.Println("closing")
 		closeAllConnections()
 	}
 }
@@ -79,7 +83,7 @@ func removeConnection(c net.Conn) {
 func handleConnection(hearing net.Conn) {
 	speaking, err := net.Dial("tcp", *speak)
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		hearing.Close()
 		return
 	}
