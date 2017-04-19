@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 )
@@ -91,7 +92,11 @@ func copyConn(dst, src *net.TCPConn) {
 	addConnection(src)
 	_, err := io.Copy(dst, src)
 	if err != nil {
-		log.Println(err)
+		// We commonly get use of closed network connection when a server shuts down
+		// active
+		if !strings.Contains(err.Error(), "use of closed network connection") {
+			log.Println(err)
+		}
 	}
 	src.Close()
 	dst.CloseWrite()
